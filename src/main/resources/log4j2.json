@@ -1,0 +1,63 @@
+{
+  "configuration": {
+    "status": "WARN",
+    "name": "DuplicateCheckLogConfig",
+    "packages": "",
+    "appenders": {
+      "Console": {
+        "type": "Console",
+        "name": "Console",
+        "target": "SYSTEM_OUT",
+        "PatternLayout": {
+          "pattern": "%d{yyyy-MM-dd HH:mm:ss} %-5p [%t] %c{1}:%L - %m%n"
+        }
+      },
+      "RollingFile": {
+        "type": "RollingFile",
+        "name": "RollingFile",
+        "fileName": "logs/duplicatecheck.log",
+        "filePattern": "logs/duplicatecheck-%d{yyyy-MM-dd}-%i.log.gz",
+        "PatternLayout": {
+          "pattern": "%d{yyyy-MM-dd HH:mm:ss} %-5p [%t] %c{1}:%L - %m%n"
+        },
+        "Policies": {
+          "SizeBasedTriggeringPolicy": {
+            "size": "10MB"
+          }
+        },
+        "DefaultRolloverStrategy": {
+          "max": "5"
+        }
+      }
+    },
+    "loggers": {
+      "logger": [
+        {
+          "name": "org.springframework",
+          "level": "INFO",
+          "additivity": false,
+          "appender-ref": [
+            { "ref": "Console" },
+            { "ref": "RollingFile" }
+          ]
+        },
+        {
+          "name": "com.wu",
+          "level": "DEBUG",
+          "additivity": false,
+          "appender-ref": [
+            { "ref": "Console" },
+            { "ref": "RollingFile" }
+          ]
+        }
+      ],
+      "root": {
+        "level": "INFO",
+        "appender-ref": [
+          { "ref": "Console" },
+          { "ref": "RollingFile" }
+        ]
+      }
+    }
+  }
+}
