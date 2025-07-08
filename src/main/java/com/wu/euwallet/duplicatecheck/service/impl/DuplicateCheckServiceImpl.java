@@ -1,8 +1,10 @@
 package com.wu.euwallet.duplicatecheck.service.impl;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.wu.euwallet.duplicatecheck.adaptor.*;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.wu.euwallet.duplicatecheck.adaptor.BizAdaptor;
+import com.wu.euwallet.duplicatecheck.adaptor.BlazeAdaptor;
+import com.wu.euwallet.duplicatecheck.adaptor.MambuAdaptor;
 import com.wu.euwallet.duplicatecheck.config.KafkaTopicsConfig;
 import com.wu.euwallet.duplicatecheck.constants.DuplicateCheckConstants;
 import com.wu.euwallet.duplicatecheck.exception.exceptiontype.WUExceptionType;
@@ -15,7 +17,9 @@ import com.wu.euwallet.duplicatecheck.model.request.biz.PinChangeRequest;
 import com.wu.euwallet.duplicatecheck.model.request.blaze.RiskCheckRequest;
 import com.wu.euwallet.duplicatecheck.model.response.ProfileUpdateResponse;
 import com.wu.euwallet.duplicatecheck.service.DuplicateCheckService;
+import com.wu.euwallet.duplicatecheck.service.HttpService;
 import com.wu.euwallet.duplicatecheck.service.MarqetaUpdateService;
+import com.wu.euwallet.duplicatecheck.transformer.UcdUpdateRequestBuilder;
 import com.wu.euwallet.duplicatecheck.validation.RequestValidator;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,33 +36,32 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DuplicateCheckServiceImpl implements DuplicateCheckService {
 
-    private final RequestValidator            validator;
-    private final BlazeAdaptor                blazeAdaptor;
-    private final BizAdaptor                  bizAdaptor;
-    private final MambuAdaptor                mambuAdaptor;
-    private final MarqetaUpdateService        marqetaUpdateService;
+    private final RequestValidator validator;
+    private final BlazeAdaptor blazeAdaptor;
+    private final BizAdaptor bizAdaptor;
+    private final MambuAdaptor mambuAdaptor;
+    private final MarqetaUpdateService marqetaUpdateService;
     private final ProfileUpdateKafkaProducer kafkaProducer;
-    private final KafkaTopicsConfig           kafkaTopics;
-    private final ObjectMapper                mapper;
+    private final KafkaTopicsConfig kafkaTopics;
+    private final ObjectMapper mapper;
+    private final HttpService httpService;
+    private final UcdUpdateRequestBuilder ucdUpdateRequestBuilder;
 
     @Override
     public ProfileUpdateResponse updateProfile(@Valid ProfileUpdateRequest request) {
-
         String correlationId = UUID.randomUUID().toString();
         String externalRefId = request.getExternalReferenceId();
 
         try {
-            // 1. Validate customer number
             validator.notBlank(request.getCustomerNumber(), "Customer number is required");
 
-            // 2. Blaze Risk Check
+            // Blaze Risk Check
             RiskCheckRequest riskRequest = RiskCheckRequest.builder()
                     .customerNumber(request.getCustomerNumber())
                     .build();
             blazeAdaptor.performRiskCheck(riskRequest);
 
-            // 3. Biz PIN update
-
+            // Biz PIN Change
             if (request.getNewPin() != null && !request.getNewPin().isBlank()) {
                 bizAdaptor.changePin(PinChangeRequest.builder()
                         .cardNumber(request.getCustomerNumber())
@@ -66,14 +69,18 @@ public class DuplicateCheckServiceImpl implements DuplicateCheckService {
                         .build());
             }
 
-            // 4. Mambu customer update
+            // Mambu Update
             mambuAdaptor.updateCustomer(request);
 
-            // 5. Marqeta card update
+            // Marqeta Card Update
             marqetaUpdateService.process(mapper.writeValueAsString(request));
 
-            // 6. Build and send business event
-            DuplicateCheckKafkaEvent okEvent = DuplicateCheckKafkaEvent.builder()
+            // UCD Update via HTTP
+            String ucdPayload = mapper.writeValueAsString(ucdUpdateRequestBuilder.buildUpdate(request,correlationId));
+            httpService.callUcdPatchEndpoint(ucdPayload);
+
+            // Success Event to Kafka
+            DuplicateCheckKafkaEvent event = DuplicateCheckKafkaEvent.builder()
                     .correlationId(correlationId)
                     .externalRefId(externalRefId)
                     .status(DuplicateCheckConstants.DUPLICATE_CHECK_SUCCESS_CODE)
@@ -83,12 +90,9 @@ public class DuplicateCheckServiceImpl implements DuplicateCheckService {
                     .eventTime(nowIso())
                     .build();
 
-            Headers headers = KafkaHeadersUtil.buildStandardHeaders(
-                    correlationId, externalRefId, "duplicate-check-svc");
+            Headers headers = KafkaHeadersUtil.buildStandardHeaders(correlationId, externalRefId, "duplicate-check-svc");
+            kafkaProducer.sendBusinessEvent(event, headers);
 
-            kafkaProducer.sendBusinessEvent(okEvent, headers);
-
-            // 7. Return API response
             return ProfileUpdateResponse.builder()
                     .status("SUCCESS")
                     .message("Profile updated successfully")
@@ -108,10 +112,8 @@ public class DuplicateCheckServiceImpl implements DuplicateCheckService {
                     .eventTime(nowIso())
                     .build();
 
-            Headers headers = KafkaHeadersUtil.buildStandardHeaders(
-                    correlationId, externalRefId, "duplicate-check-svc");
-
-            kafkaProducer.sendErrorEvent(errorEvent, headers );
+            Headers headers = KafkaHeadersUtil.buildStandardHeaders(correlationId, externalRefId, "duplicate-check-svc");
+            kafkaProducer.sendErrorEvent(errorEvent, headers);
 
             throw WUServiceExceptionUtils.buildWUServiceException(WUExceptionType.INTERNAL_SERVER_ERROR, ex.getMessage());
         }
@@ -120,7 +122,4 @@ public class DuplicateCheckServiceImpl implements DuplicateCheckService {
     private static String nowIso() {
         return OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
     }
-
-
-
 }

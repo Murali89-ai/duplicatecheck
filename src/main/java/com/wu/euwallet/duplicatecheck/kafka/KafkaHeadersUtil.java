@@ -3,13 +3,24 @@ package com.wu.euwallet.duplicatecheck.kafka;
 import org.apache.kafka.common.header.Headers;
 import org.apache.kafka.common.header.internals.RecordHeaders;
 
-public class KafkaHeadersUtil {
+import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 
-    public static Headers buildStandardHeaders(String correlationId, String externalReferenceId, String sourceSystem) {
+public final class KafkaHeadersUtil {
+
+    private KafkaHeadersUtil() { /* util class */ }
+
+    /**
+     * Builds standard Kafka headers with null-safe external reference id.
+     */
+    public static Headers buildStandardHeaders(String correlationId, String externalRefId, String sourceSystem) {
+
         Headers headers = new RecordHeaders();
-        headers.add("correlationId", correlationId.getBytes());
-        headers.add("externalReferenceId", externalReferenceId.getBytes());
-        headers.add("sourceSystem", sourceSystem.getBytes());
+
+        headers.add("correlationId", correlationId.getBytes(StandardCharsets.UTF_8));
+        headers.add("externalReferenceId", Optional.ofNullable(externalRefId).orElse("N/A").getBytes(StandardCharsets.UTF_8));
+        headers.add("sourceSystem", sourceSystem.getBytes(StandardCharsets.UTF_8));
+
         return headers;
     }
 }

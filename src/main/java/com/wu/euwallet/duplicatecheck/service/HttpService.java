@@ -1,6 +1,8 @@
 package com.wu.euwallet.duplicatecheck.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.wu.euwallet.duplicatecheck.exception.exceptiontype.WUExceptionType;
+import com.wu.euwallet.duplicatecheck.exception.utils.WUServiceExceptionUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.*;
@@ -35,5 +37,26 @@ public class HttpService {
         return postForObject(url, payload, JsonNode.class);
     }
 
-    // You can add more methods for GET, PUT, DELETE, etc., as needed.
+    public JsonNode callUcdPatchEndpoint(String ucdPayload) {
+        try {
+            String url = "http://ucd-service/update";
+            log.info("Calling UCD PATCH endpoint: {}", url);
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            HttpEntity<String> entity = new HttpEntity<>(ucdPayload, headers);
+
+            ResponseEntity<JsonNode> response = restTemplate.exchange(
+                    url, HttpMethod.PATCH, entity, JsonNode.class
+            );
+
+            return response.getBody();
+        } catch (Exception ex) {
+            log.error("Error while calling UCD PATCH endpoint", ex);
+            throw WUServiceExceptionUtils.buildWUServiceException(
+                    WUExceptionType.INTERNAL_SERVER_ERROR, ex.getMessage());
+        }
+    }
+
 }
