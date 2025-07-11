@@ -2,9 +2,14 @@ package com.wu.euwallet.duplicatecheck.transformer;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wu.euwallet.duplicatecheck.config.UcdConfig;
+import com.wu.euwallet.duplicatecheck.model.common.kafka.TransactionData;
 import com.wu.euwallet.duplicatecheck.model.request.ProfileUpdateRequest;
+import com.wu.euwallet.duplicatecheck.model.request.ucd.UcdRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+
+import java.time.LocalDateTime;
+
 @Component
 @RequiredArgsConstructor
 public class UcdUpdateRequestBuilder {
@@ -31,5 +36,15 @@ public class UcdUpdateRequestBuilder {
         cust.put("phoneNumber", req.getPhoneNumber());
         cust.put("requestInitiatedBy", cfg.getRequestedBy());
         return root;
+    }
+
+    public UcdRequest buildRequest(ProfileUpdateRequest request, TransactionData txData) {
+        return UcdRequest.builder()
+                .partyId(request.getPartyId())
+                .cardId(request.getCardId())
+                .channel(request.getChannel())
+                .requestTime(LocalDateTime.now().toString())
+                .transactionId(txData.getTransactionId())
+                .build();
     }
 }

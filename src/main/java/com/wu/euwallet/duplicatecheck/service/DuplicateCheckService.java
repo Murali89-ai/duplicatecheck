@@ -1,8 +1,12 @@
+
 package com.wu.euwallet.duplicatecheck.service;
 
+import com.wu.euwallet.duplicatecheck.dto.DuplicateCheckResponse;
+import com.wu.euwallet.duplicatecheck.model.common.kafka.TransactionData;
 import com.wu.euwallet.duplicatecheck.model.request.ProfileUpdateRequest;
-import com.wu.euwallet.duplicatecheck.model.response.ProfileUpdateResponse;
 
 public interface DuplicateCheckService {
-    ProfileUpdateResponse updateProfile(ProfileUpdateRequest request);
+
+    DuplicateCheckResponse processProfileUpdate(ProfileUpdateRequest profileUpdateRequest,
+                                                TransactionData transactionData);
 }

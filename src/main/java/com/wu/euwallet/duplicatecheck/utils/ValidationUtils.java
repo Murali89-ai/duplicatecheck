@@ -1,28 +1,29 @@
 package com.wu.euwallet.duplicatecheck.utils;
 
-
-import com.wu.euwallet.duplicatecheck.exception.exceptiontype.WUExceptionType;
 import com.wu.euwallet.duplicatecheck.exception.exceptiontype.WUServiceException;
-import jakarta.validation.ConstraintViolationException;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
+import jakarta.validation.ValidatorFactory;
+import org.springframework.stereotype.Component;
+
+import java.util.Set;
+
+import static com.wu.euwallet.duplicatecheck.exception.exceptiontype.WUExceptionType.VALIDATION_FAILED;
 
 public class ValidationUtils {
 
-    private ValidationUtils() {
-        // Prevent instantiation
-    }
+    private static final ValidatorFactory factory = Validation.buildDefaultValidatorFactory();
+    private static final Validator validator = factory.getValidator();
 
-    public static String notBlank(String value, String msg) {
-        if (value == null || value.trim().isEmpty()) {
-            throw new ConstraintViolationException(msg, null);
+    public static <T> void validate(T object) {
+        Set<ConstraintViolation<T>> violations = validator.validate(object);
+        if (!violations.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            for (ConstraintViolation<T> violation : violations) {
+                sb.append(violation.getPropertyPath()).append(": ").append(violation.getMessage()).append("; ");
+            }
+            throw new WUServiceException(VALIDATION_FAILED, sb.toString());
         }
-        return value;
-    }
-
-    public static <T> T notNull(T value, String msg) {
-        if (value == null) {
-            throw new WUServiceException(WUExceptionType.REQUEST_VALIDATION_EXCEPTION, msg);
-
-        }
-        return value;
     }
 }

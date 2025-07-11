@@ -1,10 +1,9 @@
 package com.wu.euwallet.duplicatecheck.service;
 
-import jakarta.validation.constraints.NotBlank;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.wu.euwallet.duplicatecheck.model.common.kafka.TransactionData;
+import com.wu.euwallet.duplicatecheck.model.request.ProfileUpdateRequest;
 
 public interface MarqetaUpdateService {
-    JsonNode process(@NotBlank String rawJson);
+
+    void updateCard(ProfileUpdateRequest request, TransactionData transactionData);
 }
-
-

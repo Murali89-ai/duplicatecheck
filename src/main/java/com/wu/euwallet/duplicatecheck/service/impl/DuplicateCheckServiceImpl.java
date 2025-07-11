@@ -1,125 +1,110 @@
 package com.wu.euwallet.duplicatecheck.service.impl;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.wu.euwallet.duplicatecheck.adaptor.BizAdaptor;
-import com.wu.euwallet.duplicatecheck.adaptor.BlazeAdaptor;
-import com.wu.euwallet.duplicatecheck.adaptor.MambuAdaptor;
-import com.wu.euwallet.duplicatecheck.config.KafkaTopicsConfig;
-import com.wu.euwallet.duplicatecheck.constants.DuplicateCheckConstants;
+import com.wu.euwallet.duplicatecheck.adaptor.Biz;
+import com.wu.euwallet.duplicatecheck.adaptor.Blaze;
+import com.wu.euwallet.duplicatecheck.adaptor.Mambu;
+import com.wu.euwallet.duplicatecheck.adaptor.Marqeta;
+import com.wu.euwallet.duplicatecheck.adaptor.Ping;
+import com.wu.euwallet.duplicatecheck.adaptor.RAC;
+import com.wu.euwallet.duplicatecheck.adaptor.SFMC;
+import com.wu.euwallet.duplicatecheck.adaptor.UCD;
+import com.wu.euwallet.duplicatecheck.dto.DuplicateCheckResponse;
 import com.wu.euwallet.duplicatecheck.exception.exceptiontype.WUExceptionType;
+import com.wu.euwallet.duplicatecheck.exception.exceptiontype.WUServiceException;
 import com.wu.euwallet.duplicatecheck.exception.utils.WUServiceExceptionUtils;
-import com.wu.euwallet.duplicatecheck.kafka.KafkaHeadersUtil;
-import com.wu.euwallet.duplicatecheck.kafka.producer.ProfileUpdateKafkaProducer;
-import com.wu.euwallet.duplicatecheck.model.kafka.DuplicateCheckKafkaEvent;
+import com.wu.euwallet.duplicatecheck.kafka.ProfileUpdateKafkaEventPublisher;
+import com.wu.euwallet.duplicatecheck.model.common.kafka.TransactionData;
 import com.wu.euwallet.duplicatecheck.model.request.ProfileUpdateRequest;
-import com.wu.euwallet.duplicatecheck.model.request.biz.PinChangeRequest;
-import com.wu.euwallet.duplicatecheck.model.request.blaze.RiskCheckRequest;
-import com.wu.euwallet.duplicatecheck.model.response.ProfileUpdateResponse;
+import com.wu.euwallet.duplicatecheck.model.request.biz.BizChangePinRequest;
+import com.wu.euwallet.duplicatecheck.model.request.mambu.MambuUpdateRequest;
+import com.wu.euwallet.duplicatecheck.model.request.ucd.UcdRequest;
 import com.wu.euwallet.duplicatecheck.service.DuplicateCheckService;
-import com.wu.euwallet.duplicatecheck.service.HttpService;
 import com.wu.euwallet.duplicatecheck.service.MarqetaUpdateService;
+import com.wu.euwallet.duplicatecheck.transformer.BizRequestBuilder;
+import com.wu.euwallet.duplicatecheck.transformer.ProfileUpdateRequestTransformer;
 import com.wu.euwallet.duplicatecheck.transformer.UcdUpdateRequestBuilder;
-import com.wu.euwallet.duplicatecheck.validation.RequestValidator;
-import jakarta.validation.Valid;
+import com.wu.euwallet.duplicatecheck.utils.ValidationUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.common.header.Headers;
 import org.springframework.stereotype.Service;
 
-import java.time.OffsetDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.UUID;
+import java.time.LocalDateTime;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class DuplicateCheckServiceImpl implements DuplicateCheckService {
 
-    private final RequestValidator validator;
-    private final BlazeAdaptor blazeAdaptor;
-    private final BizAdaptor bizAdaptor;
-    private final MambuAdaptor mambuAdaptor;
+    private final UCD ucd;
+    private final Marqeta marqeta;
+    private final Biz biz;
+    private final Blaze blaze;
+    private final SFMC sfmc;
+    private final Mambu mambu;
+    private final Ping ping;
+    private final RAC rac;
+
     private final MarqetaUpdateService marqetaUpdateService;
-    private final ProfileUpdateKafkaProducer kafkaProducer;
-    private final KafkaTopicsConfig kafkaTopics;
-    private final ObjectMapper mapper;
-    private final HttpService httpService;
-    private final UcdUpdateRequestBuilder ucdUpdateRequestBuilder;
+    private final ProfileUpdateKafkaEventPublisher kafkaPublisher;
+    private final UcdUpdateRequestBuilder ucdRequestBuilder;
+    private final ProfileUpdateRequestTransformer requestTransformer;
+    private final ObjectMapper objectMapper;
 
     @Override
-    public ProfileUpdateResponse updateProfile(@Valid ProfileUpdateRequest request) {
-        String correlationId = UUID.randomUUID().toString();
-        String externalRefId = request.getExternalReferenceId();
-
+    public DuplicateCheckResponse processProfileUpdate(ProfileUpdateRequest request, TransactionData txData) {
         try {
-            validator.notBlank(request.getCustomerNumber(), "Customer number is required");
+            // Validate the incoming request
+            ValidationUtils.validate(request);
 
-            // Blaze Risk Check
-            RiskCheckRequest riskRequest = RiskCheckRequest.builder()
-                    .customerNumber(request.getCustomerNumber())
-                    .build();
-            blazeAdaptor.performRiskCheck(riskRequest);
+            // Step 1: UCD Duplicate Check
+            UcdRequest ucdRequest = ucdRequestBuilder.buildRequest(request, txData);
+            JsonNode jsonNode = ucd.checkForDuplicate(ucdRequest);
 
-            // Biz PIN Change
-            if (request.getNewPin() != null && !request.getNewPin().isBlank()) {
-                bizAdaptor.changePin(PinChangeRequest.builder()
-                        .cardNumber(request.getCustomerNumber())
-                        .newPin(request.getNewPin())
-                        .build());
+            if (jsonNode != null && jsonNode.has("duplicate") && Boolean.TRUE.equals(jsonNode.get("duplicate").asBoolean())) {
+                log.warn("Duplicate detected by UCD for partyId: {}", request.getPartyId());
+                kafkaPublisher.publishDuplicateErrorEvent(request, txData, jsonNode.toString());
+                throw new WUServiceException(WUExceptionType.DUPLICATE_PROFILE_UPDATE, jsonNode.toString());
             }
 
-            // Mambu Update
-            mambuAdaptor.updateCustomer(request);
+            // Step 2: Marqeta Update
+            marqetaUpdateService.updateCard(request, txData);
 
-            // Marqeta Card Update
-            marqetaUpdateService.process(mapper.writeValueAsString(request));
+            // Step 3: Biz PIN Update
+            BizChangePinRequest bizRequest = BizRequestBuilder.buildChangePinRequest(request);
+            biz.bizChangePin(bizRequest, txData);
 
-            // UCD Update via HTTP
-            String ucdPayload = mapper.writeValueAsString(ucdUpdateRequestBuilder.buildUpdate(request,correlationId));
-            httpService.callUcdPatchEndpoint(ucdPayload);
+            // Step 4: Blaze Integration
+            blaze.evaluateRules(request, txData);
 
-            // Success Event to Kafka
-            DuplicateCheckKafkaEvent event = DuplicateCheckKafkaEvent.builder()
-                    .correlationId(correlationId)
-                    .externalRefId(externalRefId)
-                    .status(DuplicateCheckConstants.DUPLICATE_CHECK_SUCCESS_CODE)
-                    .message("Profile update successful")
-                    .sourceSystem("DUPLICATE_CHECK")
-                    .eventType("BUSINESS_EVENT")
-                    .eventTime(nowIso())
-                    .build();
+            // Step 5: Ping Update
+            ping.updateProfile(request, txData);
 
-            Headers headers = KafkaHeadersUtil.buildStandardHeaders(correlationId, externalRefId, "duplicate-check-svc");
-            kafkaProducer.sendBusinessEvent(event, headers);
+            // Step 6: RAC Integration
+            rac.sendProfileUpdate(request, txData);
 
-            return ProfileUpdateResponse.builder()
+            // Step 7: SFMC
+            sfmc.sendCommunication(request, txData);
+
+            // Step 8: Mambu Notification
+            MambuUpdateRequest mambuRequest = requestTransformer.toMambuRequest(request, txData);
+            mambu.notifyMambu(mambuRequest,txData);
+
+            // Step 9: Kafka Success Event
+            kafkaPublisher.publishProfileUpdateSuccessEvent(request, txData);
+
+            return DuplicateCheckResponse.builder()
+                    .partyId(request.getPartyId())
                     .status("SUCCESS")
-                    .message("Profile updated successfully")
-                    .correlationId(correlationId)
+                    .message("Profile update successful")
+                    .timestamp(LocalDateTime.now().toString())
                     .build();
 
         } catch (Exception ex) {
-            log.error("Profile update failed", ex);
-
-            DuplicateCheckKafkaEvent errorEvent = DuplicateCheckKafkaEvent.builder()
-                    .correlationId(correlationId)
-                    .externalRefId(externalRefId)
-                    .status(DuplicateCheckConstants.DUPLICATE_CHECK_ERROR_CODE)
-                    .message(ex.getMessage())
-                    .sourceSystem("DUPLICATE_CHECK")
-                    .eventType("ERROR_EVENT")
-                    .eventTime(nowIso())
-                    .build();
-
-            Headers headers = KafkaHeadersUtil.buildStandardHeaders(correlationId, externalRefId, "duplicate-check-svc");
-            kafkaProducer.sendErrorEvent(errorEvent, headers);
-
-            throw WUServiceExceptionUtils.buildWUServiceException(WUExceptionType.INTERNAL_SERVER_ERROR, ex.getMessage());
+            log.error("Error in processing profile update for partyId {}", request.getPartyId(), ex);
+            throw WUServiceExceptionUtils.buildWUServiceException(WUExceptionType.SERVICE_FAILED,
+                    "Profile update processing failed", ex);
         }
-    }
-
-    private static String nowIso() {
-        return OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
     }
 }

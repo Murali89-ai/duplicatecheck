@@ -13,8 +13,17 @@ public class ProfileUpdateRequest {
     @JsonProperty("email")
     private String email;
 
+    @JsonProperty("partyId")
+    private String partyId;
+
+    @JsonProperty("oldPin")
+    private String oldPin;
+
     @JsonProperty("newPin")
     private String newPin;
+
+    @JsonProperty("cardId")
+    private String cardId;
 
     @NotBlank(message = "customer number is required")
     @JsonProperty("customerNumber")
@@ -75,4 +84,7 @@ public class ProfileUpdateRequest {
     @Size(max = 10)
     @JsonProperty("language")
     private String language;
+
+    @JsonProperty("transactionId")
+    private String transactionId;
 }

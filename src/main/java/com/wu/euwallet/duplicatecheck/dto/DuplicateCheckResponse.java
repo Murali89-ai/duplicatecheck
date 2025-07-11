@@ -22,4 +22,7 @@ public class DuplicateCheckResponse {
     private String transactionId;
     private String description;
     private String correlationId;
+    private String partyId;
+    private String timestamp;
+
 }

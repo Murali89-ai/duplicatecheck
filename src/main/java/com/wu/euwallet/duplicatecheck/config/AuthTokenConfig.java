@@ -11,4 +11,9 @@ public class AuthTokenConfig {
     private String tokenUrl;
     private String clientId;
     private String clientSecret;
+    private String tokenUcdXApiKey;
+    private String tokenUsername;
+    private String tokenScope;
+    private String tokenPassword;
+    private String jwtInstance;
 }

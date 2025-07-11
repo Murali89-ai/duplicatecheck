@@ -1,10 +1,7 @@
 package com.wu.euwallet.duplicatecheck.config;
 
 import lombok.Data;
-import lombok.Getter;
-import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
 
 @Data
 @ConfigurationProperties(prefix = "integration.ucd")
@@ -15,4 +12,7 @@ public class UcdConfig {
     private String appName;
     private String appVersion;
     private String requestedBy;      // maps to p('ucd.requestedBy')
+    private String apiKey;
+    private String bearerToken;
+    private String duplicateCheckPath;
 }
